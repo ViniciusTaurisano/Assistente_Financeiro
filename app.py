@@ -4,8 +4,9 @@ from streamlit_gsheets import GSheetsConnection
 from datetime import date
 
 # Configuração e Design
-st.set_page_config(page_title="Gestão Premium", layout="wide")
+st.set_page_config(page_title="Finanças do Casal v5.0", layout="wide")
 
+# Estilização personalizada
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
@@ -15,15 +16,21 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- CONEXÃO GOOGLE SHEETS ---
-conn = st.connection("gsheets", type=GSheetsConnection)
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection)
 
-def get_data():
-    # Ajustado para os nomes exatos dos seus prints: 'gastos' e 'categoria'
-    gastos = conn.read(worksheet="gastos", ttl="0")
-    categorias = conn.read(worksheet="categoria", ttl="0")
-    return gastos.dropna(how="all"), categorias.dropna(how="all")
+    def get_data():
+        # Lendo abas: 'gastos' e 'categoria' conforme prints image_76a644 e image_76a65d
+        # O uso de ttl="0" garante dados em tempo real
+        gastos = conn.read(worksheet="gastos", ttl="0")
+        categorias = conn.read(worksheet="categoria", ttl="0") # Corrigido para 'categoria' (singular) conforme seu print
+        return gastos.dropna(how="all"), categorias.dropna(how="all")
 
-df_gastos, df_categorias = get_data()
+    df_gastos, df_categorias = get_data()
+
+except Exception as e:
+    st.error("Erro de conexão: Verifique se o link da planilha está correto nos Secrets do Streamlit.")
+    st.stop()
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -32,10 +39,11 @@ with st.sidebar:
 
     st.divider()
     
+    # --- CONFIGURAÇÃO DE CATEGORIAS ---
     with st.expander("⚙️ Configurar Categorias"):
         st.subheader("Nova")
         n_cat = st.text_input("Nome da Categoria")
-        t_cat = st.selectbox("Vincular a:", ["Casamento", "Rotina Mensal"])
+        t_cat = st.selectbox("Tipo:", ["Casamento", "Rotina Mensal"])
         
         if st.button("Adicionar Categoria"):
             if n_cat:
@@ -47,6 +55,18 @@ with st.sidebar:
                     st.rerun()
                 else:
                     st.error("Esta categoria já existe!")
+            else:
+                st.warning("Digite um nome.")
+
+        st.divider()
+        st.subheader("Remover")
+        if not df_categorias.empty:
+            cat_para_excluir = st.selectbox("Escolha para apagar:", df_categorias['nome'].tolist())
+            if st.button("Remover Permanentemente"):
+                df_cat_updated = df_categorias[df_categorias['nome'] != cat_para_excluir]
+                conn.update(worksheet="categoria", data=df_cat_updated)
+                st.warning("Categoria removida!")
+                st.rerun()
 
 # --- PÁGINA 1: LANÇAMENTOS & EDIÇÃO ---
 if menu == "📝 Lançamentos & Edição":
@@ -59,19 +79,15 @@ if menu == "📝 Lançamentos & Edição":
                 data_l = st.date_input("Data", date.today())
                 proj_l = st.selectbox("Destino", ["Casamento", "Rotina Mensal"])
             with c2:
-                # Filtragem inteligente de categorias
-                if not df_categorias.empty:
-                    cats_filtradas = df_categorias[df_categorias['tipo'] == proj_l]['nome'].tolist()
-                    cat_l = st.selectbox("Categoria", cats_filtradas if cats_filtradas else ["Cadastre uma categoria"])
-                else:
-                    cat_l = st.selectbox("Categoria", ["Nenhuma categoria encontrada"])
+                # Filtra categorias baseado no destino selecionado
+                cats_disponiveis = df_categorias[df_categorias['tipo'] == proj_l]['nome'].tolist()
+                cat_l = st.selectbox("Categoria", cats_disponiveis if cats_disponiveis else ["Geral"])
             with c3:
                 val_l = st.number_input("Valor (R$)", min_value=0.0, format="%.2f")
             
             desc_l = st.text_input("Descrição")
             
             if st.form_submit_button("Salvar Registro"):
-                # Usei 'descricao' sem o 'til' para bater com seu print da planilha
                 novo_id = int(pd.Timestamp.now().timestamp())
                 novo_gasto = pd.DataFrame([{
                     "id": novo_id, "data": data_l.isoformat(), "projeto": proj_l, 
@@ -79,59 +95,73 @@ if menu == "📝 Lançamentos & Edição":
                 }])
                 df_gastos_updated = pd.concat([df_gastos, novo_gasto], ignore_index=True)
                 conn.update(worksheet="gastos", data=df_gastos_updated)
-                st.success("Salvo com sucesso!")
+                st.success("Gasto salvo no Google Sheets!")
                 st.rerun()
 
-    # --- EDIÇÃO / EXCLUSÃO ---
     st.divider()
     st.subheader("🛠️ Editar ou Remover Itens")
     if not df_gastos.empty:
         df_display = df_gastos.sort_values('data', ascending=False)
-        escolha_id = st.selectbox(
-            "Selecione o lançamento:",
-            df_display['id'].tolist(),
-            format_func=lambda x: f"ID {x} | {df_display[df_display.id==x]['data'].values[0]} | R$ {df_display[df_display.id==x]['valor'].values[0]}"
-        )
+        
+        # Criando uma lista legível para o selectbox
+        opcoes_edicao = df_display.apply(lambda x: f"ID {x['id']} | {x['data']} | {x['descricao']}", axis=1).tolist()
+        escolha_label = st.selectbox("Selecione o item:", opcoes_edicao)
+        escolha_id = int(escolha_label.split(" | ")[0].replace("ID ", ""))
         
         item = df_gastos[df_gastos.id == escolha_id].iloc[0]
         
         with st.container(border=True):
             col_e1, col_e2, col_e3 = st.columns(3)
             with col_e1:
-                n_data = st.date_input("Data", pd.to_datetime(item['data']))
-                n_proj = st.selectbox("Destino ", ["Casamento", "Rotina Mensal"], index=0 if item['projeto']=="Casamento" else 1)
+                n_data = st.date_input("Alterar Data", pd.to_datetime(item['data']))
+                n_proj = st.selectbox("Alterar Destino", ["Casamento", "Rotina Mensal"], 
+                                      index=0 if item['projeto']=="Casamento" else 1)
             with col_e2:
                 n_cats = df_categorias[df_categorias['tipo'] == n_proj]['nome'].tolist()
-                n_cat = st.selectbox("Categoria ", n_cats, index=n_cats.index(item['categoria']) if item['categoria'] in n_cats else 0)
+                idx_cat = n_cats.index(item['categoria']) if item['categoria'] in n_cats else 0
+                n_cat = st.selectbox("Alterar Categoria", n_cats, index=idx_cat)
             with col_e3:
-                n_val = st.number_input("Valor ", value=float(item['valor']), format="%.2f")
+                n_val = st.number_input("Alterar Valor", value=float(item['valor']), format="%.2f")
             
-            n_desc = st.text_input("Descrição ", value=item['descricao'])
+            n_desc = st.text_input("Alterar Descrição", value=item['descricao'])
             
-            b1, b2, _ = st.columns([1,1,2])
-            if b1.button("💾 Atualizar"):
-                df_gastos.loc[df_gastos.id == escolha_id, ['data', 'projeto', 'categoria', 'descricao', 'valor']] = [n_data.isoformat(), n_proj, n_cat, n_desc, n_val]
+            btn1, btn2, _ = st.columns([1.5, 1, 2])
+            if btn1.button("💾 Salvar Alterações", type="primary"):
+                df_gastos.loc[df_gastos.id == escolha_id, ['data', 'projeto', 'categoria', 'descricao', 'valor']] = \
+                    [n_data.isoformat(), n_proj, n_cat, n_desc, n_val]
                 conn.update(worksheet="gastos", data=df_gastos)
-                st.success("Atualizado!")
+                st.success("Registro atualizado!")
                 st.rerun()
             
-            if b2.button("🗑️ Excluir"):
+            if btn2.button("🗑️ Excluir"):
                 df_gastos_updated = df_gastos[df_gastos.id != escolha_id]
                 conn.update(worksheet="gastos", data=df_gastos_updated)
-                st.warning("Excluído!")
+                st.warning("Registro excluído!")
                 st.rerun()
 
 # --- PÁGINA 2: DASHBOARDS ---
 else:
-    st.header("📊 Dashboards")
+    st.header("📊 Análise Financeira")
+    f_destino = st.multiselect("Filtrar Destino:", ["Casamento", "Rotina Mensal"], default=["Casamento", "Rotina Mensal"])
+    
     if not df_gastos.empty:
-        df = df_gastos.copy()
+        df = df_gastos[df_gastos['projeto'].isin(f_destino)].copy()
         df['data'] = pd.to_datetime(df['data'])
         
-        m1, m2 = st.columns(2)
+        m1, m2, m3 = st.columns(3)
         m1.metric("Gasto Total", f"R$ {df['valor'].sum():,.2f}")
-        m2.metric("Lançamentos", len(df))
+        m2.metric("Nº de Itens", len(df))
+        m3.metric("Média", f"R$ {df['valor'].mean():,.2f}")
         
-        st.bar_chart(df.groupby('categoria')['valor'].sum())
+        st.divider()
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("💰 Por Categoria")
+            chart_data = df.groupby('categoria')['valor'].sum()
+            st.bar_chart(chart_data)
+        with c2:
+            st.subheader("📈 Evolução")
+            evolucao = df.groupby('data')['valor'].sum()
+            st.line_chart(evolucao)
     else:
-        st.info("Nenhum dado para exibir no Dashboard.")
+        st.info("Nenhum dado encontrado para gerar o dashboard.")
