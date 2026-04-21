@@ -23,7 +23,7 @@ try:
         # Lendo abas: 'gastos' e 'categoria' conforme prints image_76a644 e image_76a65d
         # O uso de ttl="0" garante dados em tempo real
         gastos = conn.read(worksheet="gastos", ttl="0")
-        categorias = conn.read(worksheet="categoria", ttl="0") # Corrigido para 'categoria' (singular) conforme seu print
+        categorias = conn.read(worksheet="categorias", ttl="0") # Corrigido para 'categoria' (singular) conforme seu print
         return gastos.dropna(how="all"), categorias.dropna(how="all")
 
     df_gastos, df_categorias = get_data()
@@ -50,7 +50,7 @@ with st.sidebar:
                 if n_cat not in df_categorias['nome'].values:
                     nova_linha = pd.DataFrame([{"nome": n_cat, "tipo": t_cat}])
                     df_cat_updated = pd.concat([df_categorias, nova_linha], ignore_index=True)
-                    conn.update(worksheet="categoria", data=df_cat_updated)
+                    conn.update(worksheet="categorias", data=df_cat_updated)
                     st.success("Categoria adicionada!")
                     st.rerun()
                 else:
@@ -64,7 +64,7 @@ with st.sidebar:
             cat_para_excluir = st.selectbox("Escolha para apagar:", df_categorias['nome'].tolist())
             if st.button("Remover Permanentemente"):
                 df_cat_updated = df_categorias[df_categorias['nome'] != cat_para_excluir]
-                conn.update(worksheet="categoria", data=df_cat_updated)
+                conn.update(worksheet="categorias", data=df_cat_updated)
                 st.warning("Categoria removida!")
                 st.rerun()
 
