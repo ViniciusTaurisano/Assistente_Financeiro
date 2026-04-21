@@ -3,10 +3,10 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 from datetime import date
 
-# Configuração e Design
+# 1. Configuração da página DEVE ser a primeira linha de comando Streamlit
 st.set_page_config(page_title="Finanças do Casal v5.0", layout="wide")
 
-# Estilização personalizada
+# 2. Estilização
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
@@ -15,18 +15,18 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- CONEXÃO GOOGLE SHEETS ---
-try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
+# 3. Conexão (Sem o try/except para debug)
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-    def get_data():
-        # Lendo abas: 'gastos' e 'categoria' conforme prints image_76a644 e image_76a65d
-        # O uso de ttl="0" garante dados em tempo real
-        gastos = conn.read(worksheet="gastos", ttl="0")
-        categorias = conn.read(worksheet="categorias", ttl="0") # Corrigido para 'categoria' (singular) conforme seu print
-        return gastos.dropna(how="all"), categorias.dropna(how="all")
+def get_data():
+    # ttl=0 evita que o Streamlit use dados antigos do cache
+    gastos = conn.read(worksheet="gastos", ttl=0)
+    categorias = conn.read(worksheet="categorias", ttl=0)
+    return gastos.dropna(how="all"), categorias.dropna(how="all")
 
-    df_gastos, df_categorias = get_data()
+# 4. Carga de dados
+df_gastos, df_categorias = get_data()
+
 
 except Exception as e:
     st.error("Erro de conexão: Verifique se o link da planilha está correto nos Secrets do Streamlit.")
