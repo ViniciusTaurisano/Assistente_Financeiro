@@ -3,10 +3,10 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 from datetime import date
 
-# 1. Configuração da página DEVE ser a primeira linha de comando Streamlit
+# 1. Configuração da página (DEVE ser a primeira função Streamlit)
 st.set_page_config(page_title="Finanças do Casal v5.0", layout="wide")
 
-# 2. Estilização
+# 2. Estilização personalizada
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
@@ -15,22 +15,18 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. Conexão (Sem o try/except para debug)
+# 3. Conexão com Google Sheets
+# Removi o try/except para que o Streamlit mostre o erro real de conexão se ele persistir
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
-    # ttl=0 evita que o Streamlit use dados antigos do cache
+    # Lendo abas: 'gastos' e 'categorias'
     gastos = conn.read(worksheet="gastos", ttl=0)
     categorias = conn.read(worksheet="categorias", ttl=0)
     return gastos.dropna(how="all"), categorias.dropna(how="all")
 
-# 4. Carga de dados
+# 4. Carga inicial dos dados
 df_gastos, df_categorias = get_data()
-
-
-except Exception as e:
-    st.error("Erro de conexão: Verifique se o link da planilha está correto nos Secrets do Streamlit.")
-    st.stop()
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -79,7 +75,6 @@ if menu == "📝 Lançamentos & Edição":
                 data_l = st.date_input("Data", date.today())
                 proj_l = st.selectbox("Destino", ["Casamento", "Rotina Mensal"])
             with c2:
-                # Filtra categorias baseado no destino selecionado
                 cats_disponiveis = df_categorias[df_categorias['tipo'] == proj_l]['nome'].tolist()
                 cat_l = st.selectbox("Categoria", cats_disponiveis if cats_disponiveis else ["Geral"])
             with c3:
@@ -95,15 +90,13 @@ if menu == "📝 Lançamentos & Edição":
                 }])
                 df_gastos_updated = pd.concat([df_gastos, novo_gasto], ignore_index=True)
                 conn.update(worksheet="gastos", data=df_gastos_updated)
-                st.success("Gasto salvo no Google Sheets!")
+                st.success("Gasto salvo!")
                 st.rerun()
 
     st.divider()
     st.subheader("🛠️ Editar ou Remover Itens")
     if not df_gastos.empty:
         df_display = df_gastos.sort_values('data', ascending=False)
-        
-        # Criando uma lista legível para o selectbox
         opcoes_edicao = df_display.apply(lambda x: f"ID {x['id']} | {x['data']} | {x['descricao']}", axis=1).tolist()
         escolha_label = st.selectbox("Selecione o item:", opcoes_edicao)
         escolha_id = int(escolha_label.split(" | ")[0].replace("ID ", ""))
@@ -115,7 +108,7 @@ if menu == "📝 Lançamentos & Edição":
             with col_e1:
                 n_data = st.date_input("Alterar Data", pd.to_datetime(item['data']))
                 n_proj = st.selectbox("Alterar Destino", ["Casamento", "Rotina Mensal"], 
-                                      index=0 if item['projeto']=="Casamento" else 1)
+                                     index=0 if item['projeto']=="Casamento" else 1)
             with col_e2:
                 n_cats = df_categorias[df_categorias['tipo'] == n_proj]['nome'].tolist()
                 idx_cat = n_cats.index(item['categoria']) if item['categoria'] in n_cats else 0
@@ -130,13 +123,13 @@ if menu == "📝 Lançamentos & Edição":
                 df_gastos.loc[df_gastos.id == escolha_id, ['data', 'projeto', 'categoria', 'descricao', 'valor']] = \
                     [n_data.isoformat(), n_proj, n_cat, n_desc, n_val]
                 conn.update(worksheet="gastos", data=df_gastos)
-                st.success("Registro atualizado!")
+                st.success("Atualizado!")
                 st.rerun()
             
             if btn2.button("🗑️ Excluir"):
                 df_gastos_updated = df_gastos[df_gastos.id != escolha_id]
                 conn.update(worksheet="gastos", data=df_gastos_updated)
-                st.warning("Registro excluído!")
+                st.warning("Excluído!")
                 st.rerun()
 
 # --- PÁGINA 2: DASHBOARDS ---
