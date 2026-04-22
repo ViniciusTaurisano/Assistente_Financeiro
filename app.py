@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
 from datetime import date
 
-# 1. Configuração da página (DEVE ser a primeira função Streamlit)
+# 1. Configuração da página
 st.set_page_config(page_title="Finanças do Casal v5.0", layout="wide")
 
 # 2. Estilização personalizada
@@ -15,18 +14,24 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. Conexão com Google Sheets
-# Removi o try/except para que o Streamlit mostre o erro real de conexão se ele persistir
-conn = st.connection("gsheets", type=GSheetsConnection)
+# 3. Inicialização de dados (Substituindo o Banco de Dados por Session State)
+if 'df_gastos' not in st.session_state:
+    st.session_state.df_gastos = pd.DataFrame([
+        {"id": 1, "data": "2024-04-20", "projeto": "Casamento", "categoria": "Buffet", "descricao": "Entrada Buffet", "valor": 5000.00},
+        {"id": 2, "data": "2024-04-21", "projeto": "Rotina Mensal", "categoria": "Aluguel", "descricao": "Parcela Abril", "valor": 2500.00}
+    ])
 
-def get_data():
-    # Lendo abas: 'gastos' e 'categorias'
-    gastos = conn.read(worksheet="gastos", ttl=0)
-    categorias = conn.read(worksheet="categorias", ttl=0)
-    return gastos.dropna(how="all"), categorias.dropna(how="all")
+if 'df_categorias' not in st.session_state:
+    st.session_state.df_categorias = pd.DataFrame([
+        {"nome": "Buffet", "tipo": "Casamento"},
+        {"nome": "Decoração", "tipo": "Casamento"},
+        {"nome": "Aluguel", "tipo": "Rotina Mensal"},
+        {"nome": "Mercado", "tipo": "Rotina Mensal"}
+    ])
 
-# 4. Carga inicial dos dados
-df_gastos, df_categorias = get_data()
+# Atalhos para facilitar o uso no código
+df_gastos = st.session_state.df_gastos
+df_categorias = st.session_state.df_categorias
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -35,7 +40,6 @@ with st.sidebar:
 
     st.divider()
     
-    # --- CONFIGURAÇÃO DE CATEGORIAS ---
     with st.expander("⚙️ Configurar Categorias"):
         st.subheader("Nova")
         n_cat = st.text_input("Nome da Categoria")
@@ -43,25 +47,9 @@ with st.sidebar:
         
         if st.button("Adicionar Categoria"):
             if n_cat:
-                if n_cat not in df_categorias['nome'].values:
-                    nova_linha = pd.DataFrame([{"nome": n_cat, "tipo": t_cat}])
-                    df_cat_updated = pd.concat([df_categorias, nova_linha], ignore_index=True)
-                    conn.update(worksheet="categorias", data=df_cat_updated)
-                    st.success("Categoria adicionada!")
-                    st.rerun()
-                else:
-                    st.error("Esta categoria já existe!")
-            else:
-                st.warning("Digite um nome.")
-
-        st.divider()
-        st.subheader("Remover")
-        if not df_categorias.empty:
-            cat_para_excluir = st.selectbox("Escolha para apagar:", df_categorias['nome'].tolist())
-            if st.button("Remover Permanentemente"):
-                df_cat_updated = df_categorias[df_categorias['nome'] != cat_para_excluir]
-                conn.update(worksheet="categorias", data=df_cat_updated)
-                st.warning("Categoria removida!")
+                nova_linha = pd.DataFrame([{"nome": n_cat, "tipo": t_cat}])
+                st.session_state.df_categorias = pd.concat([st.session_state.df_categorias, nova_linha], ignore_index=True)
+                st.success("Categoria adicionada localmente!")
                 st.rerun()
 
 # --- PÁGINA 1: LANÇAMENTOS & EDIÇÃO ---
@@ -88,49 +76,13 @@ if menu == "📝 Lançamentos & Edição":
                     "id": novo_id, "data": data_l.isoformat(), "projeto": proj_l, 
                     "categoria": cat_l, "descricao": desc_l, "valor": val_l
                 }])
-                df_gastos_updated = pd.concat([df_gastos, novo_gasto], ignore_index=True)
-                conn.update(worksheet="gastos", data=df_gastos_updated)
-                st.success("Gasto salvo!")
+                st.session_state.df_gastos = pd.concat([st.session_state.df_gastos, novo_gasto], ignore_index=True)
+                st.success("Gasto salvo na memória!")
                 st.rerun()
 
     st.divider()
-    st.subheader("🛠️ Editar ou Remover Itens")
-    if not df_gastos.empty:
-        df_display = df_gastos.sort_values('data', ascending=False)
-        opcoes_edicao = df_display.apply(lambda x: f"ID {x['id']} | {x['data']} | {x['descricao']}", axis=1).tolist()
-        escolha_label = st.selectbox("Selecione o item:", opcoes_edicao)
-        escolha_id = int(escolha_label.split(" | ")[0].replace("ID ", ""))
-        
-        item = df_gastos[df_gastos.id == escolha_id].iloc[0]
-        
-        with st.container(border=True):
-            col_e1, col_e2, col_e3 = st.columns(3)
-            with col_e1:
-                n_data = st.date_input("Alterar Data", pd.to_datetime(item['data']))
-                n_proj = st.selectbox("Alterar Destino", ["Casamento", "Rotina Mensal"], 
-                                     index=0 if item['projeto']=="Casamento" else 1)
-            with col_e2:
-                n_cats = df_categorias[df_categorias['tipo'] == n_proj]['nome'].tolist()
-                idx_cat = n_cats.index(item['categoria']) if item['categoria'] in n_cats else 0
-                n_cat = st.selectbox("Alterar Categoria", n_cats, index=idx_cat)
-            with col_e3:
-                n_val = st.number_input("Alterar Valor", value=float(item['valor']), format="%.2f")
-            
-            n_desc = st.text_input("Alterar Descrição", value=item['descricao'])
-            
-            btn1, btn2, _ = st.columns([1.5, 1, 2])
-            if btn1.button("💾 Salvar Alterações", type="primary"):
-                df_gastos.loc[df_gastos.id == escolha_id, ['data', 'projeto', 'categoria', 'descricao', 'valor']] = \
-                    [n_data.isoformat(), n_proj, n_cat, n_desc, n_val]
-                conn.update(worksheet="gastos", data=df_gastos)
-                st.success("Atualizado!")
-                st.rerun()
-            
-            if btn2.button("🗑️ Excluir"):
-                df_gastos_updated = df_gastos[df_gastos.id != escolha_id]
-                conn.update(worksheet="gastos", data=df_gastos_updated)
-                st.warning("Excluído!")
-                st.rerun()
+    st.subheader("🛠️ Visualização dos Itens")
+    st.dataframe(df_gastos, use_container_width=True)
 
 # --- PÁGINA 2: DASHBOARDS ---
 else:
@@ -156,5 +108,3 @@ else:
             st.subheader("📈 Evolução")
             evolucao = df.groupby('data')['valor'].sum()
             st.line_chart(evolucao)
-    else:
-        st.info("Nenhum dado encontrado para gerar o dashboard.")
